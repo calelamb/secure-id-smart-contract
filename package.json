@@ -13,6 +13,7 @@
     "hardhat": "^2.25.0"
   },
   "dependencies": {
+    "@openzeppelin/contracts": "^4.9.0",
     "adm-zip": "^0.4.16",
     "agent-base": "^6.0.2",
     "aggregate-error": "^3.1.0",
@@ -96,6 +97,7 @@
     "lodash": "^4.17.21",
     "log-symbols": "^4.1.0",
     "lru_map": "^0.3.3",
+    "lucide-react": "^0.539.0",
     "memorystream": "^0.3.1",
     "micro-eth-signer": "^0.14.0",
     "micro-packed": "^0.7.3",
