@@ -6,6 +6,7 @@ import { WalletModalProvider, WalletMultiButton } from "@solana/wallet-adapter-r
 import { PhantomWalletAdapter, SolflareWalletAdapter } from "@solana/wallet-adapter-wallets";
 import { Upload, Shield, FileText, Search, CheckCircle, Clock, X, Copy, Award, Globe, FileCheck, Menu, ChevronLeft, Home, FolderOpen, UploadCloud, ShieldCheck, Sparkles, Lock, Fingerprint, Cloud } from 'lucide-react';
 import StackwellLogo from './components/StackwellLogo';
+import { SolanaDocumentService } from './services/SolanaDocumentService';
 import contractABI from "./contract/OfficialDocumentNFT.json";
 
 const contractAddress = import.meta.env.VITE_CONTRACT_ADDRESS;
@@ -14,7 +15,7 @@ const StackwellNFT = () => {
   const [activeTab, setActiveTab] = useState('documents');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { connection } = useConnection();
-  const { publicKey, connected } = useWallet();
+  const { publicKey, connected, wallet, signTransaction, sendTransaction } = useWallet();
   const [isWalletConnected, setIsWalletConnected] = useState(false);
   const [userAddress, setUserAddress] = useState('');
   const [status, setStatus] = useState("");
@@ -29,13 +30,14 @@ const StackwellNFT = () => {
   const [isAuthorizedIssuer, setIsAuthorizedIssuer] = useState(false);
 
   useEffect(() => {
-    if (connected && publicKey) {
-      setIsWalletConnected(true);
-      setUserAddress(publicKey.toString());
-      loadDocuments();
-      checkIssuerStatus();
-    }
-  }, [connected, publicKey]);
+  if (connected && publicKey) {
+    setIsWalletConnected(true);
+    setUserAddress(publicKey.toString());
+    // Comment out Ethereum functions for now
+    // loadDocuments();
+    // checkIssuerStatus();
+  }
+}, [connected, publicKey]);
 
   const connectWallet = async () => {
     if (typeof window.ethereum !== 'undefined') {
@@ -103,6 +105,7 @@ const StackwellNFT = () => {
   };
 
   const uploadToIPFS = async (file) => {
+    // This is now handled by SolanaDocumentService
     const hash = `Qm${Math.random().toString(36).substr(2, 40)}`;
     return hash;
   };
@@ -118,57 +121,58 @@ const StackwellNFT = () => {
     try {
       setStatus("Encrypting your document...");
       
-      const arrayBuffer = await file.arrayBuffer();
-      const buffer = new Uint8Array(arrayBuffer);
-      const fileHash = ethers.keccak256(buffer);
+      // Create wallet adapter for the service
+      const walletAdapter = {
+        publicKey: publicKey,
+        signTransaction: signTransaction,
+        signAllTransactions: signTransaction, // Use same as signTransaction
+        sendTransaction: sendTransaction
+      };
+
+      // Initialize the Solana service
+      const solanaService = new SolanaDocumentService(connection, walletAdapter);
       
-      const imageHash = await uploadToIPFS(file);
-      const metadataURI = `ipfs://Qm${Math.random().toString(36).substr(2, 40)}`;
+      setStatus("Uploading to IPFS...");
+      
+      // Mint NFT (this also uploads to IPFS)
+      const result = await solanaService.mintDocumentNFT(file);
       
       setStatus("Securing on blockchain...");
       
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const signer = await provider.getSigner();
-      const contract = new ethers.Contract(contractAddress, contractABI.abi, signer);
+      // Store the document info
+      const newDoc = {
+        id: result.mint,
+        name: file.name,
+        type: documentType,
+        hash: result.fileHash,
+        ipfsUrl: result.ipfsUrl,
+        uploadDate: new Date().toISOString(),
+        status: 'verified',
+        tokenAddress: result.mint,
+        jurisdiction: jurisdiction,
+        issuer: isAuthorizedIssuer ? "Stackwell Official" : userAddress || publicKey.toString()
+      };
       
-      let tx;
-      if (isAuthorizedIssuer) {
-        tx = await contract.registerOfficialDocument(
-          userAddress,
-          documentType,
-          fileHash,
-          imageHash,
-          metadataURI,
-          "Stackwell Official",
-          jurisdiction
-        );
-      } else {
-        tx = await contract.selfRegisterDocument(
-          documentType,
-          fileHash,
-          imageHash,
-          metadataURI,
-          jurisdiction
-        );
-      }
-      
-      setStatus("Finalizing...");
-      await tx.wait();
+      // Add to local state
+      setDocuments(prev => [...prev, newDoc]);
       
       setStatus("Document secured successfully!");
+      console.log("NFT Mint Address:", result.mint);
+      console.log("View on Explorer:", `https://explorer.solana.com/address/${result.mint}?cluster=devnet`);
+      
       setActiveTab('documents');
-      await loadDocuments();
       
       setDocumentType('');
       setJurisdiction('');
       
     } catch (error) {
-      console.error(error);
-      setStatus("Error: " + error.message);
+      console.error("Upload error:", error);
+      setStatus(`Error: ${error.message}`);
     } finally {
       setIsUploading(false);
     }
   };
+ 
 
   const verifyDocumentByHash = async () => {
     if (!verificationHash) return;
@@ -296,7 +300,7 @@ const StackwellNFT = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {documents.map(doc => (
                 <div 
-                  key={doc.tokenId} 
+                  key={doc.id || doc.tokenId}
                   className="group bg-gradient-to-br from-gray-50 to-white rounded-xl p-6 hover:shadow-xl transition-all cursor-pointer border border-gray-100"
                   onClick={() => openModal(doc)}
                 >
@@ -316,6 +320,10 @@ const StackwellNFT = () => {
                     {doc.name}
                   </h3>
                   <p className="text-sm text-gray-500 mb-4">{doc.jurisdiction}</p>
+                  <p className="text-sm text-gray-500 mb-4">{doc.jurisdiction}</p>
+                  <p className="text-xs text-gray-400 font-mono mt-2">
+                      {doc.hash ? `${doc.hash.substring(0, 12)}...` : 'No hash'}
+                    </p>
                   
                   <div className="flex items-center justify-between text-xs text-gray-500">
                     <span>{new Date(doc.timestamp).toLocaleDateString()}</span>
